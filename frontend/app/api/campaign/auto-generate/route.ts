@@ -65,6 +65,66 @@ async function rewriteDescription(ctx: ContentContext): Promise<string | null> {
   } catch { return null }
 }
 
+// ---------------------------------------------------------------------------
+// Assemble full post body from AI content + metadata components
+// ---------------------------------------------------------------------------
+
+const PUBLISHING_PLATFORMS_SET = new Set(['devto', 'hashnode', 'medium', 'substack'])
+const SHORT_PLATFORMS_SET       = new Set(['twitter', 'bluesky', 'pocket', 'instapaper'])
+
+function assemblePostBody(
+  aiContent:   string,
+  title:       string | null,
+  description: string | null,
+  cta:         string,
+  sourceUrl:   string | null,
+  platform:    string,
+  charLimit:   number
+): string {
+  const isPublishing = PUBLISHING_PLATFORMS_SET.has(platform)
+  const isShort      = SHORT_PLATFORMS_SET.has(platform)
+
+  const isFallback = !aiContent ||
+    (title != null && aiContent.trim().toLowerCase() === title.trim().toLowerCase())
+
+  if (isFallback) {
+    const parts: string[] = []
+    if (isPublishing && title) parts.push(`## ${title}`)
+    else if (title)            parts.push(title)
+    if (description)           parts.push(description)
+    if (cta)                   parts.push(cta)
+    if (!isPublishing && sourceUrl) parts.push(sourceUrl)
+    const out = parts.filter(Boolean).join('\n\n')
+    return (charLimit > 0 && out.length > charLimit) ? out.slice(0, charLimit) : out
+  }
+
+  if (isShort) return aiContent
+
+  if (isPublishing) {
+    const parts: string[] = []
+    if (title) parts.push(`## ${title}`)
+    if (description) parts.push(description)
+    parts.push(aiContent)
+    if (cta && !aiContent.includes(cta)) parts.push(cta)
+    const out = parts.filter(Boolean).join('\n\n')
+    return (charLimit > 0 && out.length > charLimit) ? out.slice(0, charLimit) : out
+  }
+
+  const parts: string[] = []
+  const lower     = aiContent.toLowerCase()
+  const titleSnip = title       ? title.toLowerCase().slice(0, 40)       : ''
+  const descSnip  = description ? description.toLowerCase().slice(0, 40) : ''
+
+  if (title && titleSnip && !lower.includes(titleSnip))     parts.push(title)
+  if (description && descSnip && !lower.includes(descSnip)) parts.push(description)
+  parts.push(aiContent)
+  if (cta && !lower.includes(cta.toLowerCase()))            parts.push(cta)
+  if (sourceUrl && !lower.includes(sourceUrl))              parts.push(sourceUrl)
+
+  const out = parts.filter(Boolean).join('\n\n')
+  return (charLimit > 0 && out.length > charLimit) ? out.slice(0, charLimit) : out
+}
+
 function computeScheduledAt(startDate: string | null, slotIndex: number, frequency: CampaignFrequency): string {
   const intervalMs = frequencyToMs(frequency)
   const now        = new Date()
@@ -322,15 +382,17 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         }
       }
 
-      if (!content) content = enrichedCtx.title ?? sourceUrl ?? `[Content for ${platform}]`
-
-      // Append source URL to post body for social platforms (publishing platforms handle it in their adapters)
-      const PUBLISHING_PLATFORMS = new Set(['devto', 'hashnode', 'medium', 'substack'])
       const charLimit = limits?.charLimit ?? 500
-      if (sourceUrl && content && !PUBLISHING_PLATFORMS.has(platform) && !content.includes(sourceUrl)) {
-        const suffix = `\n${sourceUrl}`
-        if (content.length + suffix.length <= charLimit) content += suffix
-      }
+      // Assemble full structured post body: title + description + AI content + CTA + URL
+      content = assemblePostBody(
+        content,
+        rewrittenTitle,
+        rewrittenDescription,
+        pSettings.cta || '',
+        sourceUrl,
+        platform,
+        charLimit
+      )
 
       // Apply per-platform hashtag count limit
       if (pSettings.hashtags) {

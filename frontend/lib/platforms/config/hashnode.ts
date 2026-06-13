@@ -22,7 +22,7 @@ export const hashnode: PlatformConfig = {
       type: 'text',
       placeholder: 'yourblog.hashnode.dev',
       required: true,
-      helpText: 'Your publication domain (e.g. yourblog.hashnode.dev or a custom domain).',
+      helpText: 'Domain only — no https:// prefix (e.g. yourblog.hashnode.dev or yourcustomdomain.com). Found in your Hashnode blog settings.',
       encrypted: false,
     },
   ],

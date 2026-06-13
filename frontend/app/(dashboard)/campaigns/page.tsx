@@ -1,6 +1,7 @@
 "use client"
 
 import { useState, useMemo, useCallback } from "react"
+import { createClient } from "@/lib/supabase/client"
 import { Header } from "@/components/layout/header"
 import { SearchFilter } from "@/components/layout/search-filter"
 import { Pagination } from "@/components/layout/pagination"
@@ -268,6 +269,43 @@ export default function CampaignsPage() {
       urlCount:       totalUrlCount,
       urlIds:         form.urlIds,
     })
+
+    // ---- Save URLs to campaign_urls table so auto-generate can find them ----
+    try {
+      const supabase = createClient()
+      const { data: { user } } = await supabase.auth.getUser()
+      if (user && campaign.id) {
+        const selectedLibraryUrls = libraryUrls.filter((u) => form.urlIds.includes(u.id))
+        const allUrlRows = [
+          ...selectedLibraryUrls.map((u) => ({
+            user_id:      user.id,
+            campaign_id:  campaign.id,
+            original_url: u.originalUrl,
+            title:        u.title || null,
+            is_active:    true,
+            slug:         u.id.replace(/-/g, "").slice(0, 32),
+            tags:         u.tags ?? [],
+            clicks:       0,
+          })),
+          ...form.campaignUrls.map((u) => ({
+            user_id:      user.id,
+            campaign_id:  campaign.id,
+            original_url: u.originalUrl,
+            title:        u.title || null,
+            is_active:    true,
+            slug:         u.id.replace(/-/g, "").slice(0, 32),
+            tags:         u.tags ?? [],
+            clicks:       0,
+          })),
+        ]
+        if (allUrlRows.length > 0) {
+          const { error: urlInsertErr } = await supabase.from("campaign_urls").insert(allUrlRows)
+          if (urlInsertErr) console.error("[campaigns] Failed to save campaign URLs:", urlInsertErr)
+        }
+      }
+    } catch (urlErr) {
+      console.error("[campaigns] URL save error (non-fatal):", urlErr)
+    }
 
     if (activateAfter && schedulePreview) {
       const preview = schedulePreview
